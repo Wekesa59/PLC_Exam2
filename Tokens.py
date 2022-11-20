@@ -1,3 +1,4 @@
+import string
 
 Token_add = 'Token_add'
 Token_sub = 'Token_sub'
@@ -16,10 +17,20 @@ Token_RP = 'Token_RP'
 Token_int = 'Token_int'
 Token_float = 'Token_float'
 Token_EOF = 'Token_EOF'
+Token_Identify = 'Token_Identify'
+Token_Key = "Token_Key"
+
 
 Digit = '0123456789'
+Letter = string.ascii_letters
+lettter_digit =  Letter + Digit
 Keywords = [
-    ''
+    'SENSATIONAL', #Variable name
+    'Wallabee', #For loop (Numba 4 from KND)
+    'Major_L', #while loop plus what I'm getting for a grade
+    'STOOL', #step
+    'DOS', #To
+    'NOW' #Then
 ]
 
 class Tokens:
@@ -48,6 +59,9 @@ class Lexer:
         while self.current_char != None:
             if self.current_char in '\t':
                 self.advance()
+                #check for identifier
+            elif self.current_char in Letter:
+                tokens.append(self.make_ident())
                 #Check for numbers
             elif self.current_char in Digit:
                 tokens.append(self.make_num())
@@ -117,6 +131,16 @@ class Lexer:
             return Tokens(Token_int, int(num_str))
         else:
             return Tokens(Token_float, float(num_str))
+
+    def make_ident(self):
+        string_id = ''
+        while self.current_char != None and self.current_char in lettter_digit + '_':
+            string_id += self.current_char
+            self.advance()
+
+        tok_type = Token_Key if string_id in Keywords else Token_Identify
+        return Tokens(tok_type, string_id, self.pos)
+
     def run(text):
         lexer = Lexer(text)
         tokens, error = lexer.make_tokens()
@@ -176,7 +200,7 @@ class Parse:
         elif token.type in (Token_int, Token_float):
             self.advance()
             return Num_node
-        elif tok.type == TT_LPAREN:
+        elif token.type == Token_LP:
             result.register(self.advance())
             expr = res.register(self.expr())
             if result.error: return res
@@ -184,10 +208,79 @@ class Parse:
                 result.register(self.advance())
                 return result.success(expr)
             else:
-                return result.failure(InvalidSyntaxError(
+                return result.failure(InValidSyntaxError(
 					self.current_tok.pos_start, self.current_tok.pos_end,
 					"Expected ')'"
 				))
+
+    def for_loop(self):
+        result = ParseResult()
+
+        if not self.current_tok.matches(Token_Key, 'Wallabee'):
+            return result.failure(InValidSyntaxError(
+				self.current_tok.pos_start, self.current_tok.pos_end,
+				f"Expected 'Wallabee'"
+			))
+
+        result.register_advancement()
+        self.advance()
+
+        if self.current_tok.type != Token_Identify:
+            return result.failure(InValidSyntaxError(
+				self.current_tok.pos_start, self.current_tok.pos_end,
+				f"Expected identifier"
+			))
+
+        var_name = self.current_tok
+        result.register_advancement()
+        self.advance()
+
+        if self.current_tok.type != Token_equal:
+            return result.failure(InValidSyntaxError(
+				self.current_tok.pos_start, self.current_tok.pos_end,
+				f"Expected '='"
+			))
+		
+        result.register_advancement()
+        self.advance()
+
+        start_value = res.register(self.expr())
+        if result.error: return res
+
+        if not self.current_tok.matches(Token_Key, 'DOS'):
+            return result.failure(InValidSyntaxError(
+				self.current_tok.pos_start, self.current_tok.pos_end,
+				f"Expected 'DOS'"
+			))
+		
+        result.register_advancement()
+        self.advance()
+
+        end_value = result.register(self.expr())
+        if result.error: return result
+
+        if self.current_tok.matches(Token_Key, 'STOOL'):
+            result.register_advancement()
+            self.advance()
+
+            step_value = result.register(self.expr())
+            if result.error: return result
+        else:
+            stool_value = None
+
+        if not self.current_tok.matches(Token_Key, 'NOW'):
+            return result.failure(InValidSyntaxError(
+				self.current_tok.pos_start, self.current_tok.pos_end,
+				f"Expected 'NOW'"
+			))
+
+        result.register_advancement()
+        self.advance()
+
+        body = result.register(self.expr())
+        if res.error: return res
+
+        return result.success(ForNode(var_name, start_value, end_value, step_value, body))
     def parse(self):
         result = self.expression()
         if not result and self.current_token != Token_EOF:
@@ -197,7 +290,59 @@ class Parse:
     def term(self):
         return self.binary_op(self.factor, (Token_mul, Token_div))
     def expression(self):
-        return self.binary_op(self.term, (Token_add, Token_sub))
+        result = ParseResult()
+        if self.current_token.matches(Token_Key, 'SENSATIONAL'):
+                result.register(self.advance())
+                if self.current_tok.type != Token_Identify:
+                    return result.failure(InValidSyntaxError(
+					self.current_tok.pos_start, self.current_tok.pos_end,
+					"Expected identifier"
+				))
+
+        variable = self.current_token
+        result.register_advancement()
+        self.advance()
+
+        if self.current_tok.type != Token_equal:
+            return result.failure(InValidSyntaxError(
+					self.current_tok.pos_start, self.current_tok.pos_end,
+					"Expected '='"
+				))
+
+        result.register_advancement()
+        self.advance()
+        expr = result.register(self.expr())
+        if result.error: return result
+        return result.success(VarAssignNode(variable, expr))
+
+        node = result.register(self.binary_op(self.term, (Token_add, Token_sub)))
+
+        if result.error:
+            return result.failure(InValidSyntaxError(
+				self.current_tok.pos_start, self.current_tok.pos_end,
+				"Expected 'VAR', int, float, identifier, '+', '-' or '('"
+			))
+
+        return result.success(node)
+
+class For:
+    def __init__(self, var_name_tok, start_value_node, end_value_node, step_value_node, body_node):
+        self.var_name_tok = var_name_tok
+        self.start_value_node = start_value_node
+        self.end_value_node = end_value_node
+        self.step_value_node = step_value_node
+        self.body_node = body_node
+
+        self.pos_start = self.var_name_tok.pos_start
+        self.pos_end = self.body_node.pos_end
+class while_loop:
+    def __init__(self, condition_node, body_node):
+        self.condition_node = condition_node
+        self.body_node = body_node
+
+        self.pos_start = self.condition_node.pos_start
+        self.pos_end = self.body_node.pos_end
+
     def binary_op(self, function, op):
         left = self.factor()
         while self.current_token.type in (Token_mul, Token_div):
@@ -206,6 +351,21 @@ class Parse:
             right = self.factor()
             left = Binary_node(left, operation, right)
         return left
+
+class Table:
+    def __init__(self):
+        self.symbol = {}
+        self.parent = None
+
+    def get(self, name):
+        value = self.symbol.get(name, None)
+        if value == None and self.parent:
+            return parent.get(name)
+        return value
+    def set(self, name, value):
+        self.symbol[name] = value
+    def remove(self, name):
+        del self.symbbol[name]
 #Error messages
 class Error:
     def __init__(self, error, details):
@@ -229,3 +389,25 @@ class InValidSyntaxError(Error):
     def __init__(self, pos_start, pos_end, details=''):
         super().__init__(pos_start, pos_end, 'Invalid Syntax', details)
 
+class ParseResult:
+	def __init__(self):
+		self.error = None
+		self.node = None
+		self.advance_count = 0
+
+	def register_advancement(self):
+		self.advance_count += 1
+
+	def register(self, res):
+		self.advance_count += res.advance_count
+		if res.error: self.error = res.error
+		return res.node
+
+	def success(self, node):
+		self.node = node
+		return self
+
+	def failure(self, error):
+		if not self.error or self.advance_count == 0:
+			self.error = error
+		return self
